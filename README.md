@@ -5,6 +5,7 @@ Decode microKorg .prg files and create a text representation of the patch in edi
 
 e.g. will accept a .prg file downloaded from the microKorg into SoundEditor (and possibly modified) and create something like this:
 
+```
 New Name
 [Voice]: Synth , Layer , Poly , -- , --  
 [Pitch]: 0 , 0 cent , 0 , 2 , 5  
@@ -20,4 +21,5 @@ New Name
 [Patch 1]: LFO1 , Pitch , 0 , -- , --  
 [Patch 2]: LFO2 , Pitch , 0 , -- , --  
 [Patch 3]: LFO1 , Cutoff , 0 , -- , --  
-[Patch 4]: LFO2 , Cutoff , 0 , -- , --  
+[Patch 4]: LFO2 , Cutoff , 0 , -- , --
+```
