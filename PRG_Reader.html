@@ -1,0 +1,593 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>microKorg PRG Patch Decoder</title>
+<script>
+//GLOBALs
+//the file data
+var fileData;
+
+//pointer into the byte array. Used throughout the following.
+//Always points to the next unread byte
+var ptr=0;
+var ptr0=0;//used to record the pointer at the start of the actual patch
+
+//used to accumulate the hex representation of the MIDI data (i.e. the actual patch data)
+var patchHex="Patch Hex=\r\n";
+
+var voiceMode="";//values from voiceValues
+
+//Look-up lists for the encoded settings
+var voiceValues = ["Single","Undefined","Layer","Vocoder"];
+var timebaseValues = ["1/32","1/24","1/16","1/12","3/32","1/8","1/6","3/16","1/4",
+"1/3","3/8","1/2","2/3","3/4","1/1"];//used for delay, see "T-1" in MIDI implementation gudie
+var delayTypes=["Stero","Cross","L-R"];
+var modfxTypes=["Cho/flg","Ensemble","Phaser"];
+var hiF=["1kHz","1.25kHz","1.5kHz","1.75kHz","2kHz","2.25kHz","2.5kHz","2.75kHz","3kHz",
+"3.25kHz","3.5kHz","3.75kHz","4kHz","4.25kHz","4.5kHz","4.75kHz","5kHz","5.25kHz","5.5kHz",
+"5.75kHz","6kHz","7kHz","8kHz","9kHz","10kHz","11kHz","12kHz","14kHz","16kHz","18kHz"];
+var loF=["40Hz","50Hz","60Hz","80Hz","100Hz","120Hz","140Hz","160Hz","180Hz","200Hz",
+"220Hz","240Hz","260Hz","280Hz","300Hz","320Hz","340Hz","360Hz","380Hz","400Hz","420Hz",
+"440Hz","460Hz","480Hz","500Hz","600Hz","700Hz","800Hz","900Hz","1000Hz"];
+var arpTargetTimbre=["Both","Timbre1","Timbre2"];
+var arpTypes=["Up","Down","Alt1","Alt2","Random","Trigger"];
+var arpResolution=["1/24","1/16","1/12","1/8","1/6","1/4"];
+var voiceModeTypes=["Mono","Poly","Unison"];
+var triggerMode=["Single","Multi"];
+var osc1Waves=["Saw","Square","Triangle","Sine","Vox Wave","DWGS","Noise","Audio In"];
+var osc2Mod=["None","Sync","Ring","Ring-Sync"];
+var osc2Waves=["Saw","Square","Triangle"];
+var filterType=["-24dB LP","-12dB LP", "-12dB BP", "-12dB HP"];
+var lfoSync=["Off","Timbre","Voice"];
+var lfo1Waves=["Saw","Square","Triangle","S&H"];
+var lfo2Waves=["Saw","Squ+","Sine","S&H"];
+var lfoSyncNote=["1/1","3/4","2/3","1/2","3/8","1/3","1/4","3/16","1/6","1/8",
+"3/32","1/12","1/16","1/24","1/32"];
+var patchSource=["EG1","EG2","LFO1","LFO2","Velocity","Key Track","Bend","Mod Wheel"];
+var patchDestination=["Pitch","Osc2 Pitch","Ctl1","Noise","Cutoff","Amp","Pan","LFO2 Freq"];
+
+
+//this holds the patch as an edit-section, knob matrix.
+//it is sectioned because the settings of VOICE determine what is needed
+var arpa=0, arpb=1, pattern=2,state=3;
+var arpLabels = ["Areggio A","Arpeggio B","Arp. Pattern","Arp. State"];
+var arp;
+
+var delay=1, modfx=0, eq=2;
+var fx
+var fxLabels = ["Mod FX","Delay","EQ"];
+
+var voice=0, pitch=1, osc1=2, osc2=3, mix=4, filter=5, fEG=6, amp=7, aEG=8, lfo1=9,
+lfo2=10, patch1=11, patch2=12, patch3=13, patch4=14;
+var timbre1;
+var timbre2;
+
+var timbreLabels=["Voice","Pitch","Osc 1","Osc 2","Mix Levels","Filter","Filter EG","Amp",
+"Amp EG","LFO 1","LFO 2","Patch 1","Patch 2","Patch 3","Patch 4"];
+
+
+function processData(fileBuffer){
+//get the data into a real array, as pure bytes
+fileData = new Uint8Array(fileBuffer);
+
+//find the start of the SysEx
+for(var i=0;i<fileData.length;i++){
+ if(fileData[i]==0xF0){
+	ptr=i+1;
+	break;
+}
+}
+
+//clear messages (in case previously set)
+document.getElementById("messages").innerHTML="";
+
+//did we fail to find a SysEx?
+if(ptr==0){
+document.getElementById("messages").innerHTML="Failed to find start of SysEx. Not a valid .prg file.";
+return;
+}
+
+//skip the length
+//length is a "variable length quantity", in which the last byte is 
+//indicated by bit7=0, while preceeding bytes have bit7=1
+do{
+	ptr++;
+	}while(fileData[ptr]&0x80);
+ptr++;
+
+//check that the manufacturer and device are for microKorg
+if(!(fileData[ptr]==0x42 && fileData[ptr+2]==0x58)){
+document.getElementById("messages").innerHTML="File is not from a microKorg or is not a single patch (could be a full dump)";
+return;
+}
+ptr+=4;
+
+//this is the start point as far as patch data
+ptr0=ptr;
+
+//reset the patch data arrays
+arp = [["--","--","--","--","--"],["--","--","--","--","--"],["--"],["--"]];
+fx = [["--","--","--","--","--"],["--","--","--","--","--"],["--","--","--","--","--"]];
+timbre1=[["--","--","--","--","--"],["--","--","--","--","--"],
+["--","--","--","--","--"],["--","--","--","--","--"],["--","--","--","--","--"],
+["--","--","--","--","--"],["--","--","--","--","--"],["--","--","--","--","--"],
+["--","--","--","--","--"],["--","--","--","--","--"],["--","--","--","--","--"],
+["--","--","--","--","--"],["--","--","--","--","--"],["--","--","--","--","--"],
+["--","--","--","--","--"]];
+timbre2=[["--","--","--","--","--"],["--","--","--","--","--"],
+["--","--","--","--","--"],["--","--","--","--","--"],["--","--","--","--","--"],
+["--","--","--","--","--"],["--","--","--","--","--"],["--","--","--","--","--"],
+["--","--","--","--","--"],["--","--","--","--","--"],["--","--","--","--","--"],
+["--","--","--","--","--"],["--","--","--","--","--"],["--","--","--","--","--"],
+["--","--","--","--","--"]];
+
+//the patch name and 2 dummy bytes
+var patchName="";
+var chunk = read8to7(fileData);
+for(var i=0;i<7;i++){
+patchName+=String.fromCharCode(chunk[i]);
+}
+chunk = read8to7(fileData);
+for(var i=0;i<5;i++){
+patchName+=String.fromCharCode(chunk[i]);
+}
+patchName = patchName.trim();
+
+//bytes 14 to 20
+//see table 1, "PROGRAM PARAMETER" in  http://i.korg.com/uploads/Support/MK1_633652915168960000.pdf
+chunk = read8to7(fileData);
+//14
+arp[arpb][3]=(chunk[0]&0x07)+1;
+//15
+var p="";
+var thisByte=chunk[1];
+for(var i=0;i<8;i++){
+p+=thisByte&0x01?"no":"yes";
+if(i<7) p+=",";
+thisByte=thisByte>>1;
+}
+arp[pattern][0]=p;
+//16
+var bits=(chunk[2] >>4)&0x03;
+voiceMode = voiceValues[bits];
+//17,18 not used
+//19
+bits=chunk[5]&0x80;
+fx[delay][1]=bits?"on":"off";
+if(bits){
+//delay is a timebase only if tempo sync is on
+fx[delay][2]=timebaseValues[chunk[5]&0x0F];
+}else{
+//20 (otherwise use the time value)
+fx[delay][2] = chunk[6];
+}
+
+//bytes 21 to 27
+chunk = read8to7(fileData);
+//21
+fx[delay][3]=chunk[0];
+//22
+fx[delay][0]=delayTypes[chunk[1]];
+//23
+fx[modfx][1]=chunk[2];
+//24
+fx[modfx][2]=chunk[3];
+//25
+fx[modfx][0]=modfxTypes[chunk[4]];
+//26
+fx[eq][2]=hiF[chunk[5]];
+//27
+fx[eq][3]=reRange(chunk[6],12);
+
+//bytes 28 to 34
+chunk = read8to7(fileData);
+//28
+fx[eq][0]=loF[chunk[0]];
+//29
+fx[eq][1]=reRange(chunk[1],12);
+//30 and 31 = arp tempo (MSB, LSB)
+arp[arpa][0]=chunk[2]*256+chunk[3];
+//32
+arp[state][0]=(chunk[4]&0x80)?"on":"off";
+arp[arpb][0]=(chunk[4]&0x40)?"on":"off";
+arp[arpb][4]=arpTargetTimbre[(chunk[4]>>4)&0x03];
+arp[arpb][2]=(chunk[4]&0x01)?"on":"off";
+//33
+arp[arpa][3]=arpTypes[chunk[5]&0x0F];
+arp[arpa][4]=1+(chunk[5]>>4)&0x03;
+//34
+arp[arpa][2]=Math.max(chunk[6],100)+"%";
+
+//bytes 35 to 41
+chunk = read8to7(fileData);
+//35
+arp[arpa][1]=arpResolution[chunk[0]];
+//36
+thisByte=chunk[1];
+if(thisByte>100){
+	thisByte=thisByte-256;
+}
+arp[arpb][1]=thisByte;//rescale(chunk[1],-100,100,true)+"%";
+//37 
+// - octave shift setting - skip
+// {timbre1 starts next. here we hack-in the voice mode setting}
+if(voiceMode=="Vocoder"){
+timbre1[voice][0]="Vocoder";
+}else{
+	timbre1[voice][0]="Synth";
+	timbre1[voice][1]=voiceMode;
+	if(voiceMode=="Layer"){
+		timbre2[voice][0]="Synth";
+		timbre2[voice][1]=voiceMode;
+	}
+}
+
+//38 (0) ************* BYTE 0 OF TIMBRE 1
+// - MIDI channel - skip
+//39 (1)
+bits=(chunk[4]>>6)&0x03;
+timbre1[voice][2]=voiceModeTypes[bits];
+timbre1[aEG][4]=(chunk[4]&0x20)?"yes":"no";
+timbre1[fEG][4]=(chunk[4]&0x10)?"yes":"no";
+if(bits!=1){
+	timbre1[voice][3]=triggerMode[(chunk[4]>>3)&0x01];
+}
+//40 (2) - detune only applicable if unison
+if(bits==2){
+	timbre1[voice][4]=chunk[5];
+}
+//41 (3)
+timbre1[pitch][1]=reRange(chunk[6],+50)+" cent";
+
+//bytes 42 to 48 (timbre1 4-10)
+chunk = read8to7(fileData);
+//4
+timbre1[pitch][3]=reRange(chunk[0],12);
+//5
+timbre1[pitch][0]=reRange(chunk[1],24);
+//6
+timbre1[pitch][4]=chunk[2]-64;
+//7
+bits =chunk[3]&0x07;
+timbre1[osc1][0]=osc1Waves[bits];
+//8
+timbre1[osc1][1]=chunk[4];
+//9
+timbre1[osc1][2]=chunk[5];
+//10 - only for DWGS type (overwrites ctrl 2)
+if(bits==5){
+	timbre1[osc1][2]=chunk[6];
+}
+
+//bytes 49 to 55 (timbre1 11-17)
+chunk = read8to7(fileData);
+//11 -dummy byte
+//12
+timbre1[osc2][0]=osc2Waves[chunk[1]&0x03];
+timbre1[osc2][1]=osc2Mod[(chunk[1]>>4)&0x03];
+//13
+timbre1[osc2][2]=reRange(chunk[2],24);
+//14
+timbre1[osc2][3]=chunk[3]-64;
+//15
+timbre1[pitch][2]=chunk[4];
+//16
+timbre1[mix][0]=chunk[5];
+//17
+timbre1[mix][1]=chunk[6];
+
+//bytes 56-62 (timbre1 18-24)
+chunk = read8to7(fileData);
+//18
+timbre1[mix][2]=chunk[0];
+//19
+timbre1[filter][0] = filterType[chunk[1]];
+//20
+timbre1[filter][1]=chunk[2];
+//21
+timbre1[filter][2]=chunk[3];
+//22
+timbre1[filter][3]=chunk[4]-64;
+//23 - not used 
+//24
+timbre1[filter][4]=chunk[6]-64;
+
+//bytes 63-69 (timbre1 25-31)
+chunk = read8to7(fileData);
+//25
+timbre1[amp][0]=chunk[0];
+//26
+var panpot=chunk[1]-64;
+if(panpot==0){
+	panpot="cnt";
+}else if(panpot<0){
+	panpot="L"+Math.abs(panpot);
+}else{
+	panpot="R"+panpot;
+}
+timbre1[amp][1]=panpot;
+//27
+timbre1[amp][2]=chunk[2]&0x01?"on":"off";
+//28
+// - velocity sense not used
+//29
+timbre1[amp][3]=chunk[4]-64;
+//30
+timbre1[fEG][0]=chunk[5];
+//31
+timbre1[fEG][1]=chunk[6];
+
+//bytes 70-76 (timbre1 32-38)
+chunk = read8to7(fileData);
+//32
+timbre1[fEG][2]=chunk[0];
+//33
+timbre1[fEG][3]=chunk[1];
+//34
+timbre1[aEG][0]=chunk[2];
+//35
+timbre1[aEG][1]=chunk[3];
+//36
+timbre1[aEG][2]=chunk[4];
+//37
+timbre1[aEG][3]=chunk[5];
+//38
+timbre1[lfo1][0]=lfo1Waves[chunk[6]&0x03];
+timbre1[lfo1][1]=lfoSync[(chunk[6]>>4)&0x03];
+
+//bytes 77-83 (timbre1 39-45)
+chunk = read8to7(fileData);
+//39
+timbre1[lfo1][3]=chunk[0];
+//40
+timbre1[lfo1][2]=chunk[1]&0x80?"on":"off";
+if(chunk[2]&0x80){
+	//temp sync=on will over-write LFO freq with sync note
+	timbre1[lfo1][3]=lfoSyncNote[chunk[1]&0x0F];
+}
+//41
+timbre1[lfo2][0]=lfo2Waves[chunk[2]&0x03];
+timbre1[lfo2][1]=lfoSync[(chunk[2]>>4)&0x03];
+//42
+timbre1[lfo2][3]=chunk[3];
+//43
+timbre1[lfo2][2]=chunk[4]&0x80?"on":"off";
+if(chunk[4]&0x80){
+	//temp sync=on will over-write LFO freq with sync note
+	timbre1[lfo2][3]=lfoSyncNote[chunk[4]&0x0F];
+}
+//44
+timbre1[patch1][0]=patchSource[chunk[5]&0x0F];
+timbre1[patch1][1]=patchDestination[(chunk[5]>>4)&0x0F];
+//45
+timbre1[patch1][2]=chunk[6]-64;
+
+//bytes 84-90 (timbre1 46-52)
+chunk = read8to7(fileData);
+//46
+timbre1[patch2][0]=patchSource[chunk[0]&0x0F];
+timbre1[patch2][1]=patchDestination[(chunk[0]>>4)&0x0F];
+//47
+timbre1[patch2][2]=chunk[1]-64;
+//48
+timbre1[patch3][0]=patchSource[chunk[2]&0x0F];
+timbre1[patch3][1]=patchDestination[(chunk[2]>>4)&0x0F];
+//49
+timbre1[patch3][2]=chunk[3]-64;
+//50
+timbre1[patch4][0]=patchSource[chunk[4]&0x0F];
+timbre1[patch4][1]=patchDestination[(chunk[4]>>4)&0x0F];
+//51
+timbre1[patch4][2]=chunk[5]-64;
+//52
+// -dummy
+
+//THERE ARE additional dummy bytes from 91-145 (timbre1 53-107)
+//the data pointer MUST only be moved in 8 byte chunks, and the remainder handled with read8to7
+//timbre2 starts at byte 146, but the first byte is the MIDI channel and is not needed,
+//so the first byte required in a LAYER patch is 147, which IS a multiple of 8 bytes
+ptr+=64;
+
+//TIMBRE 2
+//bytes 147-153 (timbre2 1-7)
+chunk=read8to7(fileData);
+//1
+bits=(chunk[0]>>6)&0x03;
+timbre2[voice][2]=voiceModeTypes[bits];
+timbre2[aEG][4]=(chunk[0]&0x20)?"yes":"no";
+timbre2[fEG][4]=(chunk[0]&0x10)?"yes":"no";
+if(bits!=1){
+	timbre2[voice][3]=triggerMode[(chunk[0]>>3)&0x01];
+}
+
+
+
+var patchText=patchName+"\r\n";
+//
+if(voiceMode=="Single" || voiceMode=="Layer"){
+	if(voiceMode=="Layer"){
+		patchText+="[[TIMBRE 1]]\r\n";
+	}
+	for(var i=0;i<15;i++){
+		patchText+="["+timbreLabels[i]+"]: ";
+		patchText+=formatText(timbre1[i]);
+	}
+	if(voiceMode=="Layer"){
+		patchText+="[[TIMBRE 2]]\r\n";
+		for(var i=0;i<15;i++){
+			patchText+="["+timbreLabels[i]+"]: ";
+			patchText+=formatText(timbre2[i]);
+		}
+	}	
+
+}else if(voiceMode="Vocoder"){
+	// ************** vocoder to do
+	document.getElementById("messages").innterHTML="Vocoder Patch - not currently supported";
+}
+//Output stages: fx,delay, eq
+for(var i=0;i<3;i++){
+	patchText+="["+fxLabels[i]+"]: ";
+	patchText+=formatText(fx[i]);
+}
+//arpeggiator
+for(var i=0;i<4;i++){
+	patchText+="["+arpLabels[i]+"]: ";
+	patchText+=formatText(arp[i]);
+}
+
+
+document.getElementById("hex").innerHTML = patchHex;
+
+document.getElementById("patch").innerHTML = patchText;
+}
+
+//converts settings stored in array to slash-delimited string for display
+function formatText(arr){
+	var retval="";
+	var l=arr.length;
+	for(var j=0;j<l;j++){
+		retval+=arr[j];
+		if(j<l-1){
+			retval+=" , ";
+		}
+	}
+	retval+="\r\n";
+	return retval;
+}
+
+//rescale 0-127.
+function rescale(inVal, minVal, maxVal, asInt){
+var v = minVal+(maxVal-minVal)*inVal/127;
+if(asInt){
+return v.toFixed(0);
+}else{
+ return v.toFixed(2);
+}
+}
+
+//for an input value inVal, emit an output value with a centred zero and specified min/max
+function reRange(inVal, absVal){
+	var v=inVal-64;
+	if(v==0){
+		return 0;
+	}else if(v>0){
+		return Math.min(v,absVal);
+	}else{
+		return Math.max(v,-absVal);
+	}
+}
+
+//this reads a chunk of 8 bytes in the .prg file (which is MIDI data)
+//and converts them to the 7 bytes of message data that they encode
+// see the microkorg MIDI implementation guide http://i.korg.com/uploads/Support/MK1_633652915168960000.pdf, Note 5 (data dump conversion)
+function read8to7(data){
+var chunk = new Uint8Array(7);
+var bit7s = data[ptr];
+for(var i=0;i<7;i++){
+
+	chunk[i]=(bit7s&0x01?0x80:0x00) | data[i+ptr+1];
+	bit7s=bit7s>>1;
+	patchHex=patchHex+(ptr-ptr0+i)+": 0x"+chunk[i].toString(16)+" "+String.fromCharCode(chunk[i])+"\r\n";
+//alert(chunk[i].toString(16));
+}
+ptr+=8;
+return chunk;
+}
+
+
+function handleFileBrowse() {
+  handleFile(document.getElementById("uploadInput").files[0]);
+}
+
+function handleFile(oFile){
+  var nBytes = oFile.size;
+  var sOutput = nBytes + " bytes";
+  document.getElementById("fileSize").innerHTML = sOutput;
+
+var reader = new FileReader();
+reader.onloadend=function(){processData(reader.result);};
+reader.readAsArrayBuffer(oFile);
+
+}
+
+//setup drop zone
+function dragenter(e) {
+  e.stopPropagation();
+  e.preventDefault();
+}
+function dragover(e) {
+  e.stopPropagation();
+  e.preventDefault();
+  filedrag.className="hover";
+}
+function drop(e) {
+  e.stopPropagation();
+  e.preventDefault();
+
+  filedrag.className="";
+
+  var dt = e.dataTransfer;
+  var files = dt.files;
+
+  handleFile(files[0]);
+}
+
+function Init(){
+var dropbox;
+dropbox = document.getElementById("filedrag");
+dropbox.addEventListener("dragenter", dragenter, false);
+dropbox.addEventListener("dragover", dragover, false);
+dropbox.addEventListener("drop", drop, false);
+}
+</script>
+
+<style>
+#filedrag
+{
+	display: block;
+	font-weight: bold;
+	text-align: center;
+	padding: 1em 0;
+	margin: 1em 0;
+	color: #555;
+	border: 2px dashed #555;
+	border-radius: 7px;
+	cursor: default;
+}
+
+#filedrag.hover
+{
+	color: #f00;
+	border-color: #f00;
+	border-style: solid;
+	box-shadow: inset 0 3px 4px #888;
+}
+</style>
+</head>
+
+<body onload="Init();">
+<h1>microKorg PRG Patch Decoder</h1>
+<form name="uploadForm">
+<p>
+<div id="filedrag">Drop .prg File Here</div>
+or <input id="uploadInput" type="file" name="myFiles" onchange="handleFileBrowse();"/><br/>
+
+total size: <span id="fileSize">0</span></p>
+<span id="messages"></span>
+<table><tr>
+<td><textarea id="hex" cols="13" rows="30"></textarea></td>
+<td><textarea id="patch" cols="50" rows="30"></textarea></td>
+</tr></table>
+
+</form>
+<hr/>
+<p>Reference material
+<ul>
+<li><a href="http://cs.fit.edu/~ryan/cse4051/projects/midi/midi.html">MIDI File Format</a></li>
+<li><a href="http://i.korg.com/uploads/Support/MK1_633652915168960000.pdf">microKorg MIDI Implementation</a></li>
+</ul>
+</p>
+<p>&copy;Adam Cooper, Oct 2014. MIT Open Source Licence.</p>
+</body>
+</html>
