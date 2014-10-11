@@ -50,7 +50,7 @@ var lfoSyncNote=["1/1","3/4","2/3","1/2","3/8","1/3","1/4","3/16","1/6","1/8",
 var patchSource=["EG1","EG2","LFO1","LFO2","Velocity","Key Track","Bend","Mod Wheel"];
 var patchDestination=["Pitch","Osc2 Pitch","Ctl1","Noise","Cutoff","Amp","Pan","LFO2 Freq"];
 var formantShift=["0","+1","+2","-1","-2"];
-var fcmodSource=["Amp EG","LFO 1","LFO 2","Velocity","Key Track","Bend", "Mod Wheel"];
+var fcmodSource=["---","Amp EG","LFO 1","LFO 2","Velocity","Key Track","Bend", "Mod Wheel"];
 
 
 //this holds the patch as an edit-section, knob matrix.
@@ -518,7 +518,7 @@ function doVocoder(){
 	//24
 	vocoder[fcmod][0]=fcmodSource[patchData[startAt+24]];
 	//25
-	vocoder[fcmod][1]=patchData[startAt+22]-64;
+	vocoder[fcmod][1]=patchData[startAt+25]-64;
 	//26
 	var tmp=patchData[startAt+26];
 	if(tmp == 127){
@@ -567,40 +567,41 @@ function doVocoder(){
 		//temp sync=on will over-write LFO freq with sync note
 		vocoder[lfo2][3]=lfoSyncNote[patchData[startAt+45]&0x0F];
 	}
+	//level settings apply to pairs of channels
 	//46
-	vocoder[chleva][0]=patchData[46];
-	//47
-	vocoder[chleva][1]=patchData[47];
+	vocoder[chleva][0]=patchData[startAt+46];
 	//48
-	vocoder[chleva][2]=patchData[48];
-	//49
-	vocoder[chleva][3]=patchData[49];
+	vocoder[chleva][1]=patchData[startAt+48];
 	//50
-	vocoder[chlevb][0]=patchData[50];
-	//51
-	vocoder[chlevb][1]=patchData[51];
+	vocoder[chleva][2]=patchData[startAt+50];
 	//52
-	vocoder[chlevb][2]=patchData[52];
-	//53
-	vocoder[chlevb][3]=patchData[53];
-	//?????? 54 to 61 ??????
+	vocoder[chleva][3]=patchData[startAt+52];
+	//54
+	vocoder[chlevb][0]=patchData[startAt+54];
+	//56
+	vocoder[chlevb][1]=patchData[startAt+56];
+	//58
+	vocoder[chlevb][2]=patchData[startAt+58];
+	//60
+	vocoder[chlevb][3]=patchData[startAt+60];	
 	
+	//pan settings apply to pairs of channels
 	//62
-	vocoder[chpana][0]=patchData[62];
-	//63
-	vocoder[chpana][1]=patchData[63];
+	vocoder[chpana][0]=panText(patchData[startAt+62]);
 	//64
-	vocoder[chpana][2]=patchData[64];
-	//65
-	vocoder[chpana][3]=patchData[65];
+	vocoder[chpana][1]=panText(patchData[startAt+64]);
 	//66
-	vocoder[chpanb][0]=patchData[66];
-	//67
-	vocoder[chpanb][1]=patchData[67];
+	vocoder[chpana][2]=panText(patchData[startAt+66]);
 	//68
-	vocoder[chpanb][2]=patchData[68];
-	//69
-	vocoder[chpanb][3]=patchData[69];	
+	vocoder[chpana][3]=panText(patchData[startAt+68]);
+	//70
+	vocoder[chpanb][0]=panText(patchData[startAt+70]);
+	//72
+	vocoder[chpanb][1]=panText(patchData[startAt+72]);
+	//74
+	vocoder[chpanb][2]=panText(patchData[startAt+74]);
+	//76
+	vocoder[chpanb][3]=panText(patchData[startAt+76]);	
 	
 	//78-141 is EF Hold data. Not directly programmable.
 
@@ -746,6 +747,7 @@ dropbox.addEventListener("drop", drop, false);
 
 <body onload="Init();">
 <h1>microKorg PRG Patch Decoder</h1>
+<p>This software may be used to convert ".prg" files for the microKorg to a nice readable format. These files are as downloaded from the microKorg by the Korg <a href="http://i.korg.com/SupportPage.aspx?productid=128">Sound Editor</a> software, and are often posted online (e.g. the <a href="http://i.korg.com/uploads/Download/USA_microKORG_KorgUSA_Bank.zip">microKorg sound bank</a>).</p>
 <form name="uploadForm">
 <p>
 <div id="filedrag">Drop .prg File Here</div>
@@ -767,5 +769,7 @@ total size: <span id="fileSize">0</span></p>
 </ul>
 </p>
 <p>&copy;Adam Cooper, Oct 2014. MIT Open Source Licence.</p>
+<p>The latest source code is available <a href="https://github.com/arc12/PRG_Reader">on GitHub</a>. Please submit any bug or ideas for new features using the <a href="https://github.com/arc12/PRG_Reader/issues">GitHub issue tracker</a></p>
+<p>This code <em> does not</em> transmit any data over the internet; all conversion is done on your local computer.</p>
 </body>
 </html>
